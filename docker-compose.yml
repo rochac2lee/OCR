@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    container_name: ocr_api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - FLASK_APP=app.flask_api:app
+      - FLASK_RUN_HOST=0.0.0.0
+      - FLASK_RUN_PORT=8000
+    command: ["flask", "run", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - "/Users/cleberlee/Documents/ocr/app:/app/app"
+    mem_limit: 2g
+    memswap_limit: 8g
