@@ -226,7 +226,7 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         sx, sy = float(v["sx"]), float(v["sy"])
         
         try:
-            result = ocr.ocr(variant)
+            result = ocr.ocr(variant, cls=False)
         except Exception as e:
             print(f"Erro OCR: {e}", flush=True)
             continue
@@ -253,11 +253,7 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 except Exception:
                     conf = 0.0
                 
-                # Log do que o PaddleOCR detectou (para debug)
-                if text and conf > 0.1:  # Só loga textos com alguma confiança
-                    print(f"[DEBUG] OCR detectou: '{text}' (conf={conf:.2f})", flush=True)
-                
-                # Extrai sequências de dígitos - MELHORADO
+                # Extrai sequências de dígitos
                 digit_seqs = _only_digit_sequences(text)
                 
                 # Se não encontrou, tenta extrair TODOS os dígitos do texto
@@ -298,11 +294,8 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                             "confidence": round(seq_conf, 4),
                             "bbox": bbox,
                         })
-
-    print(f"[OCR] Total de candidatos brutos: {len(candidates)}", flush=True)
     
     if not candidates:
-        print("[OCR] ⚠️ Nenhum candidato encontrado nas variantes!", flush=True)
         return []
 
     from collections import defaultdict
@@ -311,8 +304,6 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for c in candidates:
         grouped[c["number"]].append(c)
-    
-    print(f"[OCR] Números únicos antes do filtro: {sorted(grouped.keys())}", flush=True)
 
     # Filtra e retorna apenas as melhores detecções
     final_results: List[Dict[str, Any]] = []
@@ -321,10 +312,8 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         try:
             num_int = int(num)
             if num_int < 0 or num_int > 9999:  # 0-9999
-                print(f"[OCR] Filtrou '{num}' (fora do range 0-9999)", flush=True)
                 continue
         except ValueError:
-            print(f"[OCR] Filtrou '{num}' (não é número válido)", flush=True)
             continue
         
         # Pega a detecção com maior confiança
@@ -346,16 +335,8 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         
         if best["confidence"] >= min_conf:
             final_results.append(best)
-            print(f"[OCR] ✓ Aceito '{num}' (conf={best['confidence']:.2f}, min={min_conf:.2f}, vezes={len(group)})", flush=True)
-        else:
-            print(f"[OCR] ✗ Rejeitado '{num}' (conf={best['confidence']:.2f} < {min_conf:.2f})", flush=True)
 
     # Ordena por confiança (maior primeiro)
     final_results.sort(key=lambda x: x["confidence"], reverse=True)
     
-    # Log com timing
-    total_time = time.time() - start
-    ocr_time = time.time() - ocr_start
-    nums_detected = ["{0}({1}%)".format(r['number'], int(r['confidence']*100)) for r in final_results]
-    print(f"Detectado: {nums_detected} | Prep: {prep_time*1000:.0f}ms | OCR: {ocr_time*1000:.0f}ms | Total: {total_time*1000:.0f}ms", flush=True)
     return final_results
