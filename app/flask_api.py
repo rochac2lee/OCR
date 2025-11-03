@@ -50,13 +50,15 @@ def predict():
             "detail": "O campo 'image' está vazio"
         }), 400
 
-    # Validar formato de imagem
-    allowed_mimetypes = ("image/jpeg", "image/png", "image/webp", "image/jpg")
-    if file.mimetype not in allowed_mimetypes:
+    # Validar formato de imagem por extensão (mimetype pode estar vazio)
+    allowed_extensions = ('.jpg', '.jpeg', '.png', '.webp')
+    filename_lower = file.filename.lower()
+    
+    if not any(filename_lower.endswith(ext) for ext in allowed_extensions):
         return jsonify({
             "error": "Formato de imagem não suportado",
-            "detail": f"Use JPEG, PNG ou WEBP. Recebido: {file.mimetype}",
-            "allowed_formats": list(allowed_mimetypes)
+            "detail": f"Use arquivos .jpg, .jpeg, .png ou .webp",
+            "filename": file.filename
         }), 400
 
     # Processar imagem
