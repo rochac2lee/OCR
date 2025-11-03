@@ -86,7 +86,7 @@ def predict():
         formatted_results = [
             {
                 "number": r["number"],
-                "accuracy": f'{round(r["confidence"] * 100)}%',
+                "accuracy": f"{round(float(r['confidence'])*100, 1)}%",
             }
             for r in results
         ]
