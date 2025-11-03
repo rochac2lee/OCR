@@ -9,23 +9,19 @@ ENV/
 env/
 .venv/
 
-# Git
-.git/
-.gitignore
-
-# Documentation
-*.md
-!README.md
+# Flask
+instance/
+.webassets-cache
 
 # Docker
-Dockerfile
-docker-compose.yml
 .dockerignore
 
-# Logs e temporários
+# Logs
 logs/
-tmp_output/
 *.log
+
+# Temporários
+tmp_output/
 *.tmp
 
 # IDE
@@ -33,20 +29,21 @@ tmp_output/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
+# PaddleOCR cache
+.paddleocr/
+inference/
+
 # Test files
-test_*.py
-test_*.sh
 test_images/
 *.jpg
 *.png
 *.jpeg
 *.webp
+!example.jpg
 
-# Outros
-.env
-.env.*

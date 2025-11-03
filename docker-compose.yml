@@ -1,16 +1,32 @@
 services:
   api:
-    build: .
-    container_name: ocr_api
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ocr_api_fast
     ports:
       - "8000:8000"
     restart: unless-stopped
     environment:
       - FLASK_APP=app.flask_api:app
+      - FLASK_ENV=development
       - FLASK_RUN_HOST=0.0.0.0
       - FLASK_RUN_PORT=8000
+      # Otimizações Python/OpenCV
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
     command: ["flask", "run", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
-      - "/Users/cleberlee/Documents/ocr/app:/app/app"
+      # Hot reload - apenas código da aplicação
+      - "./app:/app/app"
+      # Logs persistentes
+      - "./logs:/app/logs"
     mem_limit: 2g
-    memswap_limit: 8g
+    memswap_limit: 4g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
