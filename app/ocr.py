@@ -18,30 +18,30 @@ _OCR_INSTANCE: Optional[PaddleOCR] = None
 def get_ocr() -> PaddleOCR:
     """
     Inicializa e retorna instância singleton do PaddleOCR.
-    Otimizado para múltiplos números mantendo velocidade.
+    Configurado para detectar TODOS os números em cenas com múltiplos atletas.
     """
     global _OCR_INSTANCE
     if _OCR_INSTANCE is None:
         try:
-            # Configuração balanceada: velocidade + múltiplas detecções
+            # Configuração otimizada para múltiplas detecções
             _OCR_INSTANCE = PaddleOCR(
                 use_angle_cls=False,          # OFF para velocidade
                 lang="en",                    # Números
                 use_gpu=False,                # CPU
                 show_log=False,               # Sem logs
                 
-                # Thresholds ajustados para múltiplos números
-                det_limit_side_len=1280,      # Limite maior
-                det_db_thresh=0.2,            # Mais sensível para pegar todos
-                det_db_box_thresh=0.4,        # Reduzido para capturar mais
-                det_db_unclip_ratio=2.2,      # Expande boxes
+                # Thresholds muito sensíveis para capturar TODOS os números
+                det_limit_side_len=1600,      # Aumentado para preservar detalhes
+                det_db_thresh=0.15,           # MUITO sensível
+                det_db_box_thresh=0.3,        # Baixo para capturar tudo
+                det_db_unclip_ratio=2.5,      # Expande bem os boxes
                 
-                # Otimizações
+                # Reconhecimento
                 rec_batch_num=6,              # Batch processing
-                drop_score=0.3,               # Aceita confiança menor
-                max_text_length=4,            # Máximo 3 dígitos + margem
+                drop_score=0.2,               # Aceita confiança baixa
+                max_text_length=3,            # Números de camisa: 1-3 dígitos
             )
-            print("PaddleOCR inicializado (otimizado para múltiplos números)", flush=True)
+            print("PaddleOCR inicializado (máxima detecção)", flush=True)
         except Exception as e:
             print(f"Warning: Erro config PaddleOCR: {e}", flush=True)
             _OCR_INSTANCE = PaddleOCR(
@@ -55,12 +55,11 @@ def get_ocr() -> PaddleOCR:
 
 def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     """
-    2 variantes rápidas otimizadas para múltiplos números.
-    Balanço ideal entre velocidade e detecção de todos os números.
+    3 variantes otimizadas para capturar TODOS os números em cenas complexas.
     """
-    # Redimensiona para tamanho ideal
+    # Mantém tamanho grande para preservar detalhes
     h, w = image_bgr.shape[:2]
-    max_dim = 1280  # Aumentado para capturar mais detalhes
+    max_dim = 1600  # Aumentado para manter qualidade
     
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
@@ -69,26 +68,32 @@ def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
         h, w = new_h, new_w
     
-    # Pré-processamento otimizado
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     
-    # CLAHE forte para contraste
-    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
+    # CLAHE para aumentar contraste
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     
-    # Sharpening para realçar números
-    enhanced = cv2.addWeighted(enhanced, 1.4, cv2.GaussianBlur(enhanced, (3, 3), 0), -0.4, 0)
+    # Sharpening para números
+    enhanced = cv2.addWeighted(enhanced, 1.5, cv2.GaussianBlur(enhanced, (3, 3), 0), -0.5, 0)
+    
+    # Binarização adaptativa para números em diferentes fundos
+    adaptive = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                     cv2.THRESH_BINARY, 15, 5)
     
     enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    adaptive_bgr = cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
     
-    # 2 variantes para capturar todos os números
+    # 3 variantes para máxima cobertura
     variants = [
-        # 1. Imagem processada normal
+        # 1. Imagem original (captura alguns números)
+        {"img": image_bgr, "sx": 1.0, "sy": 1.0},
+        
+        # 2. Enhanced (melhor contraste)
         {"img": enhanced_bgr, "sx": 1.0, "sy": 1.0},
         
-        # 2. Upscale para números pequenos/distantes
-        {"img": cv2.resize(enhanced_bgr, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC),
-         "sx": 1.5, "sy": 1.5},
+        # 3. Adaptive threshold (para números em fundos variados)
+        {"img": adaptive_bgr, "sx": 1.0, "sy": 1.0},
     ]
     
     return variants
@@ -167,14 +172,20 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 except Exception:
                     conf = 0.0
                 
-                # Extrai sequências de dígitos
+                # Extrai sequências de dígitos - MELHORADO
                 digit_seqs = _only_digit_sequences(text)
                 
-                # Se não encontrou, tenta extrair apenas dígitos do texto
+                # Se não encontrou, tenta extrair TODOS os dígitos do texto
                 if not digit_seqs:
                     text_digits_only = re.sub(r'[^\d]', '', text)
-                    if text_digits_only and 1 <= len(text_digits_only) <= 3:  # Máximo 3 dígitos (0-999)
-                        digit_seqs = [text_digits_only]
+                    if text_digits_only:
+                        # Remove zeros à esquerda
+                        text_digits_only = text_digits_only.lstrip('0') or '0'
+                        if 1 <= len(text_digits_only) <= 3:  # 1-3 dígitos
+                            digit_seqs = [text_digits_only]
+                
+                # Filtra números impossíveis (muito grandes)
+                digit_seqs = [s for s in digit_seqs if s and 1 <= len(s) <= 2 and int(s) <= 99]
                 
                 if not digit_seqs or box is None:
                     continue
@@ -195,9 +206,9 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 
                 # Adiciona cada sequência de dígitos encontrada
                 for seq in digit_seqs:
-                    if 1 <= len(seq) <= 3:  # Números de camisa geralmente tem 1-3 dígitos
+                    if 1 <= len(seq) <= 2:  # Números de camisa: 1-2 dígitos (0-99)
                         # Ajusta confiança baseado no match
-                        seq_conf = conf if len(seq) == len(text.strip()) else conf * 0.85
+                        seq_conf = conf if len(seq) == len(text.strip()) else conf * 0.80
                         candidates.append({
                             "number": seq,
                             "confidence": round(seq_conf, 4),
@@ -217,10 +228,10 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     # Filtra e retorna apenas as melhores detecções
     final_results: List[Dict[str, Any]] = []
     for num, group in grouped.items():
-        # Valida número (1-999 é range típico de camisas)
+        # Valida número (0-99 é range típico de camisas esportivas)
         try:
             num_int = int(num)
-            if num_int < 0 or num_int > 999:
+            if num_int < 0 or num_int > 99:  # Apenas 0-99
                 continue
         except ValueError:
             continue
@@ -228,12 +239,12 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         # Pega a detecção com maior confiança
         best = max(group, key=lambda x: x["confidence"])
         
-        # Filtro de confiança mais permissivo para capturar todos os números
-        min_conf = 0.45 if len(num) == 1 else 0.35  # Reduzido para pegar mais
+        # Filtro de confiança MUITO permissivo para não perder números
+        min_conf = 0.30 if len(num) == 1 else 0.25  # Muito baixo
         
-        # Se detectado múltiplas vezes, aceita confiança ainda menor
+        # Se detectado múltiplas vezes, aceita ainda menor
         if len(group) >= 2:
-            min_conf -= 0.15
+            min_conf = 0.20  # Quase tudo
         
         if best["confidence"] >= min_conf:
             final_results.append(best)
