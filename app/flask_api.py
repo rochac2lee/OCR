@@ -34,7 +34,6 @@ def predict():
     Example:
         curl -X POST -F "image=@camisa.jpg" http://localhost:8000/predict
     """
-    start_time = time.time()
     
     # Validação de entrada
     if "image" not in request.files:
@@ -87,18 +86,15 @@ def predict():
         formatted_results = [
             {
                 "number": r["number"],
-                "accuracy": round(r["confidence"] * 100),
+                "accuracy": f'{round(r["confidence"] * 100)}%',
             }
             for r in results
         ]
         
-        processing_time = round((time.time() - start_time) * 1000, 2)  # ms
         
         return jsonify({
-            "success": True,
             "results": formatted_results,
-            "count": len(formatted_results),
-            "processing_time_ms": processing_time
+            "count": len(formatted_results)
         })
         
     except Exception as e:
