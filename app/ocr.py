@@ -39,7 +39,7 @@ def get_ocr() -> PaddleOCR:
                 # Reconhecimento
                 rec_batch_num=6,              # Batch processing
                 drop_score=0.2,               # Aceita confiança baixa
-                max_text_length=3,            # Números de camisa: 1-3 dígitos
+                max_text_length=5,            # Números de camisa: 1-3 dígitos
             )
             print("PaddleOCR inicializado (máxima detecção)", flush=True)
         except Exception as e:
