@@ -18,79 +18,79 @@ _OCR_INSTANCE: Optional[PaddleOCR] = None
 def get_ocr() -> PaddleOCR:
     """
     Inicializa e retorna instância singleton do PaddleOCR.
-    Configurado para máxima velocidade em CPU com foco em dígitos.
+    Otimizado para múltiplos números mantendo velocidade.
     """
     global _OCR_INSTANCE
     if _OCR_INSTANCE is None:
         try:
-            # Usa modelo mobile (mais leve e rápido em CPU)
-            # Configurações otimizadas para detecção de números em camisas
+            # Configuração balanceada: velocidade + múltiplas detecções
             _OCR_INSTANCE = PaddleOCR(
-                use_angle_cls=True,          # Detecta rotação (importante para camisas)
-                lang="en",                    # Inglês para números
-                use_gpu=False,                # Força uso de CPU
-                show_log=False,               # Reduz logs desnecessários
+                use_angle_cls=False,          # OFF para velocidade
+                lang="en",                    # Números
+                use_gpu=False,                # CPU
+                show_log=False,               # Sem logs
                 
-                # Limites de tamanho - reduz processamento desnecessário
-                det_limit_side_len=960,       # Limite de lado para detecção
+                # Thresholds ajustados para múltiplos números
+                det_limit_side_len=1280,      # Limite maior
+                det_db_thresh=0.2,            # Mais sensível para pegar todos
+                det_db_box_thresh=0.4,        # Reduzido para capturar mais
+                det_db_unclip_ratio=2.2,      # Expande boxes
                 
-                # Thresholds otimizados para números em camisas
-                det_db_thresh=0.2,            # Mais sensível (pega números pequenos/foscos)
-                det_db_box_thresh=0.4,        # Threshold de confiança para boxes
-                det_db_unclip_ratio=2.5,      # Expande boxes (importante para números)
-                
-                # Configurações de reconhecimento
-                rec_batch_num=1,              # Processa 1 por vez (mais rápido em CPU)
+                # Otimizações
+                rec_batch_num=6,              # Batch processing
+                drop_score=0.3,               # Aceita confiança menor
+                max_text_length=4,            # Máximo 3 dígitos + margem
             )
-            print("PaddleOCR inicializado com sucesso (modo otimizado para CPU)", flush=True)
+            print("PaddleOCR inicializado (otimizado para múltiplos números)", flush=True)
         except Exception as e:
-            print(f"Warning: Erro ao configurar PaddleOCR otimizado: {e}", flush=True)
-            # Fallback para configuração básica
+            print(f"Warning: Erro config PaddleOCR: {e}", flush=True)
             _OCR_INSTANCE = PaddleOCR(
-                use_angle_cls=True,
+                use_angle_cls=False,
                 lang="en",
                 use_gpu=False,
                 show_log=False,
             )
-            print("PaddleOCR inicializado com configuração básica", flush=True)
+            print("PaddleOCR inicializado (fallback)", flush=True)
     return _OCR_INSTANCE
 
 def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     """
-    Gera apenas 2 variantes ultra-rápidas focadas em velocidade máxima.
-    Otimizado para <1 segundo de processamento total.
+    2 variantes rápidas otimizadas para múltiplos números.
+    Balanço ideal entre velocidade e detecção de todos os números.
     """
-    # Redimensiona imagem grande para acelerar processamento
+    # Redimensiona para tamanho ideal
     h, w = image_bgr.shape[:2]
-    max_dim = 1280  # Limite para velocidade
+    max_dim = 1280  # Aumentado para capturar mais detalhes
+    
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
         new_w = int(w * scale)
         new_h = int(h * scale)
         image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        h, w = new_h, new_w
     
-    img = image_bgr.copy()
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # CLAHE rápido para contraste
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    gray_clahe = clahe.apply(gray)
-
-    # Sharpening leve
-    sharpen = cv2.addWeighted(gray_clahe, 1.3, cv2.GaussianBlur(gray_clahe, (0, 0), 1.0), -0.3, 0)
-
-    # Apenas 2 variantes essenciais para velocidade máxima
-    variants: List[Dict[str, Any]] = [
-        # 1. Imagem original processada
-        {"img": cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR), "sx": 1.0, "sy": 1.0},
+    # Pré-processamento otimizado
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # CLAHE forte para contraste
+    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    
+    # Sharpening para realçar números
+    enhanced = cv2.addWeighted(enhanced, 1.4, cv2.GaussianBlur(enhanced, (3, 3), 0), -0.4, 0)
+    
+    enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    
+    # 2 variantes para capturar todos os números
+    variants = [
+        # 1. Imagem processada normal
+        {"img": enhanced_bgr, "sx": 1.0, "sy": 1.0},
         
-        # 2. Upscale moderado apenas se imagem for pequena
-        {"img": cv2.resize(cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR), None, 
-                          fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC) if max(h, w) < 800 else cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR),
-         "sx": 1.5 if max(h, w) < 800 else 1.0, 
-         "sy": 1.5 if max(h, w) < 800 else 1.0},
+        # 2. Upscale para números pequenos/distantes
+        {"img": cv2.resize(enhanced_bgr, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC),
+         "sx": 1.5, "sy": 1.5},
     ]
-
+    
     return variants
 
 
@@ -119,25 +119,30 @@ def _only_digit_sequences(text: str) -> List[str]:
 
 def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     """
-    Extrai números de camisas de atletas de forma rápida e eficiente.
-    Otimizado para velocidade em CPU mantendo boa precisão.
+    Extrai números de camisas ULTRA-RÁPIDO.
+    Otimizado para <1 segundo em CPU.
     """
+    import time
+    start = time.time()
+    
     ocr = get_ocr()
     
-    # Gera apenas as variantes essenciais (5 variantes vs 23+ anteriormente)
+    # Apenas 1 variante otimizada
     variants = enhance_image_for_digits(image_bgr)
+    prep_time = time.time() - start
     
     candidates: List[Dict[str, Any]] = []
 
-    # Processa cada variante
-    for v_idx, v in enumerate(variants):
+    # Processa variante única
+    ocr_start = time.time()
+    for v in variants:
         variant = v["img"]
         sx, sy = float(v["sx"]), float(v["sy"])
         
         try:
             result = ocr.ocr(variant)
         except Exception as e:
-            print(f"Erro na variante {v_idx}: {e}", flush=True)
+            print(f"Erro OCR: {e}", flush=True)
             continue
             
         if not result:
@@ -223,13 +228,12 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         # Pega a detecção com maior confiança
         best = max(group, key=lambda x: x["confidence"])
         
-        # Filtro de confiança mínima
-        # Dígitos únicos precisam de maior confiança (evitar falsos positivos)
-        min_conf = 0.60 if len(num) == 1 else 0.50
+        # Filtro de confiança mais permissivo para capturar todos os números
+        min_conf = 0.45 if len(num) == 1 else 0.35  # Reduzido para pegar mais
         
-        # Se detectado múltiplas vezes, reduz threshold (mais confiável)
+        # Se detectado múltiplas vezes, aceita confiança ainda menor
         if len(group) >= 2:
-            min_conf -= 0.1
+            min_conf -= 0.15
         
         if best["confidence"] >= min_conf:
             final_results.append(best)
@@ -237,7 +241,9 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     # Ordena por confiança (maior primeiro)
     final_results.sort(key=lambda x: x["confidence"], reverse=True)
     
-    # Log dos resultados
+    # Log com timing
+    total_time = time.time() - start
+    ocr_time = time.time() - ocr_start
     nums_detected = ["{0}({1}%)".format(r['number'], int(r['confidence']*100)) for r in final_results]
-    print(f"Números detectados: {nums_detected}", flush=True)
+    print(f"Detectado: {nums_detected} | Prep: {prep_time*1000:.0f}ms | OCR: {ocr_time*1000:.0f}ms | Total: {total_time*1000:.0f}ms", flush=True)
     return final_results
