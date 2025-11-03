@@ -150,19 +150,26 @@ def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     
     otsu_bgr = cv2.cvtColor(otsu, cv2.COLOR_GRAY2BGR)
     
-    # Retorna 4 melhores variantes
+    # Garantir que todas as imagens sejam uint8 BGR válidas
+    enhanced1 = np.clip(enhanced1, 0, 255).astype(np.uint8)
+    enhanced2_bgr = np.clip(enhanced2_bgr, 0, 255).astype(np.uint8)
+    
+    # Upscale 1.5x para capturar números pequenos/distantes
+    upscaled = cv2.resize(enhanced1, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    
+    # Retorna variantes TESTADAS
     variants = [
-        # 1. CLAHE + Denoise + Sharpen (melhor para contraste)
+        # 1. Original (sempre funciona)
+        {"img": image_bgr, "sx": 1.0, "sy": 1.0},
+        
+        # 2. CLAHE + Denoise + Sharpen (melhor para contraste)
         {"img": enhanced1, "sx": 1.0, "sy": 1.0},
         
-        # 2. Morphological enhancement (bom para bordas)
+        # 3. Morphological enhancement (bom para bordas)
         {"img": enhanced2_bgr, "sx": 1.0, "sy": 1.0},
         
-        # 3. Adaptive threshold combinado (ótimo para fundos variados)
-        {"img": adaptive_bgr, "sx": 1.0, "sy": 1.0},
-        
-        # 4. OTSU (backup para casos difíceis)
-        {"img": otsu_bgr, "sx": 1.0, "sy": 1.0},
+        # 4. Upscale 1.5x (números pequenos)
+        {"img": upscaled, "sx": 1.5, "sy": 1.5},
     ]
     
     return variants
@@ -253,8 +260,8 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                         if 1 <= len(text_digits_only) <= 3:  # 1-3 dígitos
                             digit_seqs = [text_digits_only]
                 
-                # Filtra números impossíveis (muito grandes)
-                digit_seqs = [s for s in digit_seqs if s and 1 <= len(s) <= 2 and int(s) <= 99]
+                # Aceita números de 1-4 dígitos (números de peito)
+                digit_seqs = [s for s in digit_seqs if s and 1 <= len(s) <= 4 and int(s) <= 9999]
                 
                 if not digit_seqs or box is None:
                     continue
@@ -275,7 +282,7 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 
                 # Adiciona cada sequência de dígitos encontrada
                 for seq in digit_seqs:
-                    if 1 <= len(seq) <= 2:  # Números de camisa: 1-2 dígitos (0-99)
+                    if 1 <= len(seq) <= 4:  # Números de peito: 1-4 dígitos (0-9999)
                         # Ajusta confiança baseado no match
                         seq_conf = conf if len(seq) == len(text.strip()) else conf * 0.80
                         candidates.append({
@@ -284,7 +291,10 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                             "bbox": bbox,
                         })
 
+    print(f"[OCR] Total de candidatos brutos: {len(candidates)}", flush=True)
+    
     if not candidates:
+        print("[OCR] ⚠️ Nenhum candidato encontrado nas variantes!", flush=True)
         return []
 
     from collections import defaultdict
@@ -293,30 +303,44 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for c in candidates:
         grouped[c["number"]].append(c)
+    
+    print(f"[OCR] Números únicos antes do filtro: {sorted(grouped.keys())}", flush=True)
 
     # Filtra e retorna apenas as melhores detecções
     final_results: List[Dict[str, Any]] = []
     for num, group in grouped.items():
-        # Valida número (0-99 é range típico de camisas esportivas)
+        # Valida número (0-9999 para números de peito)
         try:
             num_int = int(num)
-            if num_int < 0 or num_int > 99:  # Apenas 0-99
+            if num_int < 0 or num_int > 9999:  # 0-9999
+                print(f"[OCR] Filtrou '{num}' (fora do range 0-9999)", flush=True)
                 continue
         except ValueError:
+            print(f"[OCR] Filtrou '{num}' (não é número válido)", flush=True)
             continue
         
         # Pega a detecção com maior confiança
         best = max(group, key=lambda x: x["confidence"])
         
-        # Filtro de confiança MUITO permissivo para não perder números
-        min_conf = 0.30 if len(num) == 1 else 0.25  # Muito baixo
+        # Filtro de confiança ajustado por tamanho do número
+        if len(num) == 1:
+            min_conf = 0.35  # 1 dígito precisa de mais confiança
+        elif len(num) == 2:
+            min_conf = 0.30
+        elif len(num) == 3:
+            min_conf = 0.25
+        else:  # 4 dígitos
+            min_conf = 0.20  # 4 dígitos mais fáceis de validar
         
-        # Se detectado múltiplas vezes, aceita ainda menor
+        # Se detectado múltiplas vezes, aceita menor confiança
         if len(group) >= 2:
-            min_conf = 0.20  # Quase tudo
+            min_conf -= 0.10
         
         if best["confidence"] >= min_conf:
             final_results.append(best)
+            print(f"[OCR] ✓ Aceito '{num}' (conf={best['confidence']:.2f}, min={min_conf:.2f}, vezes={len(group)})", flush=True)
+        else:
+            print(f"[OCR] ✗ Rejeitado '{num}' (conf={best['confidence']:.2f} < {min_conf:.2f})", flush=True)
 
     # Ordena por confiança (maior primeiro)
     final_results.sort(key=lambda x: x["confidence"], reverse=True)
