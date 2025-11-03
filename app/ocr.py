@@ -55,45 +55,114 @@ def get_ocr() -> PaddleOCR:
 
 def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     """
-    3 variantes otimizadas para capturar TODOS os números em cenas complexas.
+    Pré-processamento AVANÇADO para detectar números de camisas.
+    Técnicas específicas para atletas em movimento, baixa resolução e condições variadas.
     """
-    # Mantém tamanho grande para preservar detalhes
+    # Preserva tamanho adequado
     h, w = image_bgr.shape[:2]
-    max_dim = 1600  # Aumentado para manter qualidade
+    max_dim = 1600
     
     if max(h, w) > max_dim:
         scale = max_dim / max(h, w)
         new_w = int(w * scale)
         new_h = int(h * scale)
-        image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+        h, w = new_h, new_w
+    elif max(h, w) < 800:  # Upscale se muito pequena
+        scale = 1200 / max(h, w)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
         h, w = new_h, new_w
     
+    # Converte para LAB para melhor processamento de luminância
+    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # ========== TÉCNICA 1: CLAHE Agressivo + Denoising ==========
+    # Reduz ruído primeiro
+    l_denoised = cv2.fastNlMeansDenoising(l, None, h=10, templateWindowSize=7, searchWindowSize=21)
+    
+    # CLAHE muito agressivo para contraste máximo
+    clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8, 8))
+    l_clahe = clahe.apply(l_denoised)
+    
+    # Reconstrói imagem LAB
+    lab_enhanced = cv2.merge([l_clahe, a, b])
+    enhanced1 = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+    
+    # Sharpening agressivo usando unsharp mask
+    gaussian = cv2.GaussianBlur(enhanced1, (0, 0), 2.0)
+    enhanced1 = cv2.addWeighted(enhanced1, 2.0, gaussian, -1.0, 0)
+    
+    # ========== TÉCNICA 2: Morphological Enhancement ==========
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     
-    # CLAHE para aumentar contraste
-    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
+    # Equalização de histograma
+    gray_eq = cv2.equalizeHist(gray)
     
-    # Sharpening para números
-    enhanced = cv2.addWeighted(enhanced, 1.5, cv2.GaussianBlur(enhanced, (3, 3), 0), -0.5, 0)
+    # Morphological gradient para realçar bordas dos números
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    morph = cv2.morphologyEx(gray_eq, cv2.MORPH_GRADIENT, kernel)
     
-    # Binarização adaptativa para números em diferentes fundos
-    adaptive = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                     cv2.THRESH_BINARY, 15, 5)
+    # Combina com original
+    enhanced2 = cv2.addWeighted(gray_eq, 0.7, morph, 0.3, 0)
     
-    enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-    adaptive_bgr = cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
+    # Sharpening
+    enhanced2 = cv2.addWeighted(enhanced2, 1.5, cv2.GaussianBlur(enhanced2, (0, 0), 1.0), -0.5, 0)
+    enhanced2_bgr = cv2.cvtColor(enhanced2, cv2.COLOR_GRAY2BGR)
     
-    # 3 variantes para máxima cobertura
+    # ========== TÉCNICA 3: Adaptive Threshold Múltiplo ==========
+    # CLAHE na escala de cinza
+    gray_clahe = clahe.apply(gray)
+    
+    # Bilateral filter para preservar bordas e remover ruído
+    bilateral = cv2.bilateralFilter(gray_clahe, 9, 75, 75)
+    
+    # Adaptive threshold otimizado para números
+    adaptive1 = cv2.adaptiveThreshold(bilateral, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                      cv2.THRESH_BINARY, 11, 2)
+    
+    # Segunda variação com parâmetros diferentes
+    adaptive2 = cv2.adaptiveThreshold(bilateral, 255, cv2.ADAPTIVE_THRESH_MEAN_C, 
+                                      cv2.THRESH_BINARY, 15, 3)
+    
+    # Combina os dois adaptive thresholds
+    adaptive_combined = cv2.bitwise_or(adaptive1, adaptive2)
+    
+    # Morfologia para limpar ruído
+    kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    adaptive_clean = cv2.morphologyEx(adaptive_combined, cv2.MORPH_CLOSE, kernel_small)
+    adaptive_clean = cv2.morphologyEx(adaptive_clean, cv2.MORPH_OPEN, kernel_small)
+    
+    adaptive_bgr = cv2.cvtColor(adaptive_clean, cv2.COLOR_GRAY2BGR)
+    
+    # ========== TÉCNICA 4: Contrast Stretching ==========
+    # Normaliza histograma para máximo contraste
+    norm = cv2.normalize(gray_clahe, None, 0, 255, cv2.NORM_MINMAX)
+    
+    # Aplica threshold OTSU
+    _, otsu = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Inverte se fundo for escuro
+    if np.mean(otsu) < 127:
+        otsu = cv2.bitwise_not(otsu)
+    
+    otsu_bgr = cv2.cvtColor(otsu, cv2.COLOR_GRAY2BGR)
+    
+    # Retorna 4 melhores variantes
     variants = [
-        # 1. Imagem original (captura alguns números)
-        {"img": image_bgr, "sx": 1.0, "sy": 1.0},
+        # 1. CLAHE + Denoise + Sharpen (melhor para contraste)
+        {"img": enhanced1, "sx": 1.0, "sy": 1.0},
         
-        # 2. Enhanced (melhor contraste)
-        {"img": enhanced_bgr, "sx": 1.0, "sy": 1.0},
+        # 2. Morphological enhancement (bom para bordas)
+        {"img": enhanced2_bgr, "sx": 1.0, "sy": 1.0},
         
-        # 3. Adaptive threshold (para números em fundos variados)
+        # 3. Adaptive threshold combinado (ótimo para fundos variados)
         {"img": adaptive_bgr, "sx": 1.0, "sy": 1.0},
+        
+        # 4. OTSU (backup para casos difíceis)
+        {"img": otsu_bgr, "sx": 1.0, "sy": 1.0},
     ]
     
     return variants
