@@ -57,45 +57,38 @@ def get_ocr() -> PaddleOCR:
 
 def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     """
-    Gera variantes otimizadas da imagem focadas em detecção rápida de números.
-    Reduzido para apenas 5-6 variantes mais eficazes (vs 23+ anteriormente).
+    Gera apenas 2 variantes ultra-rápidas focadas em velocidade máxima.
+    Otimizado para <1 segundo de processamento total.
     """
+    # Redimensiona imagem grande para acelerar processamento
+    h, w = image_bgr.shape[:2]
+    max_dim = 1280  # Limite para velocidade
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
     img = image_bgr.copy()
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # CLAHE para aumentar contraste (eficaz para imagens foscas)
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    # CLAHE rápido para contraste
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     gray_clahe = clahe.apply(gray)
 
-    # Sharpening para melhorar bordas dos números
-    gaussian = cv2.GaussianBlur(gray_clahe, (0, 0), 1.5)
-    sharpen = cv2.addWeighted(gray_clahe, 1.5, gaussian, -0.5, 0)
+    # Sharpening leve
+    sharpen = cv2.addWeighted(gray_clahe, 1.3, cv2.GaussianBlur(gray_clahe, (0, 0), 1.0), -0.3, 0)
 
-    # Adaptive threshold - melhor para diferentes condições de iluminação
-    adap = cv2.adaptiveThreshold(
-        sharpen, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
-    )
-
-    # Variantes ESSENCIAIS - apenas as mais eficazes
+    # Apenas 2 variantes essenciais para velocidade máxima
     variants: List[Dict[str, Any]] = [
-        # 1. Imagem original (baseline)
-        {"img": img, "sx": 1.0, "sy": 1.0},
-        
-        # 2. Sharpen + CLAHE (melhor para números claros)
+        # 1. Imagem original processada
         {"img": cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR), "sx": 1.0, "sy": 1.0},
         
-        # 3. Adaptive threshold (melhor para contraste variável)
-        {"img": cv2.cvtColor(adap, cv2.COLOR_GRAY2BGR), "sx": 1.0, "sy": 1.0},
-        
-        # 4. Upscale 2x do sharpened (para números pequenos/baixa resolução)
+        # 2. Upscale moderado apenas se imagem for pequena
         {"img": cv2.resize(cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR), None, 
-                          fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC), 
-         "sx": 2.0, "sy": 2.0},
-        
-        # 5. Upscale 2x do adaptive (para números muito pequenos)
-        {"img": cv2.resize(cv2.cvtColor(adap, cv2.COLOR_GRAY2BGR), None, 
-                          fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC),
-         "sx": 2.0, "sy": 2.0},
+                          fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC) if max(h, w) < 800 else cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR),
+         "sx": 1.5 if max(h, w) < 800 else 1.0, 
+         "sy": 1.5 if max(h, w) < 800 else 1.0},
     ]
 
     return variants
