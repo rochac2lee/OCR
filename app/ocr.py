@@ -154,8 +154,9 @@ def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     enhanced1 = np.clip(enhanced1, 0, 255).astype(np.uint8)
     enhanced2_bgr = np.clip(enhanced2_bgr, 0, 255).astype(np.uint8)
     
-    # Upscale 1.5x para capturar números pequenos/distantes
-    upscaled = cv2.resize(enhanced1, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    # Upscales para capturar números pequenos/distantes
+    upscaled_15 = cv2.resize(enhanced1, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    upscaled_20 = cv2.resize(enhanced1, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     
     # Retorna variantes TESTADAS
     variants = [
@@ -169,15 +170,18 @@ def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         {"img": enhanced2_bgr, "sx": 1.0, "sy": 1.0},
         
         # 4. Upscale 1.5x (números pequenos)
-        {"img": upscaled, "sx": 1.5, "sy": 1.5},
+        {"img": upscaled_15, "sx": 1.5, "sy": 1.5},
+        
+        # 5. Upscale 2.0x (números muito pequenos/foscos)
+        {"img": upscaled_20, "sx": 2.0, "sy": 2.0},
     ]
     
     return variants
 
 
 def _only_digit_sequences(text: str) -> List[str]:
-    """Extrai sequências de dígitos e dígitos individuais do texto."""
-    # Remove espaços e caracteres não-numéricos para focar nos dígitos
+    """Extrai sequências de dígitos, MANTENDO zeros à esquerda."""
+    # Remove espaços e caracteres não-numéricos
     text_clean = re.sub(r'[^\d]', '', text)
     if not text_clean:
         return []
@@ -186,8 +190,9 @@ def _only_digit_sequences(text: str) -> List[str]:
     seqs = re.findall(r"\d{1,4}", text)
     cleaned: List[str] = []
     for s in seqs:
-        if s.isdigit():
-            cleaned.append(str(int(s)))  # Remove zeros à esquerda
+        if s.isdigit() and 1 <= len(s) <= 4:
+            # MANTÉM zeros à esquerda!
+            cleaned.append(s)
     
     # Se não encontrou sequências, tenta pegar dígitos individuais
     if not cleaned and text_clean:
@@ -248,6 +253,10 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 except Exception:
                     conf = 0.0
                 
+                # Log do que o PaddleOCR detectou (para debug)
+                if text and conf > 0.1:  # Só loga textos com alguma confiança
+                    print(f"[DEBUG] OCR detectou: '{text}' (conf={conf:.2f})", flush=True)
+                
                 # Extrai sequências de dígitos - MELHORADO
                 digit_seqs = _only_digit_sequences(text)
                 
@@ -255,9 +264,8 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
                 if not digit_seqs:
                     text_digits_only = re.sub(r'[^\d]', '', text)
                     if text_digits_only:
-                        # Remove zeros à esquerda
-                        text_digits_only = text_digits_only.lstrip('0') or '0'
-                        if 1 <= len(text_digits_only) <= 3:  # 1-3 dígitos
+                        # MANTÉM zeros à esquerda (números de peito podem começar com 0)
+                        if 1 <= len(text_digits_only) <= 4:  # 1-4 dígitos
                             digit_seqs = [text_digits_only]
                 
                 # Aceita números de 1-4 dígitos (números de peito)
@@ -322,19 +330,19 @@ def extract_jersey_numbers(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
         # Pega a detecção com maior confiança
         best = max(group, key=lambda x: x["confidence"])
         
-        # Filtro de confiança ajustado por tamanho do número
+        # Filtro de confiança MUITO permissivo
         if len(num) == 1:
-            min_conf = 0.35  # 1 dígito precisa de mais confiança
+            min_conf = 0.30  # 1 dígito
         elif len(num) == 2:
-            min_conf = 0.30
-        elif len(num) == 3:
             min_conf = 0.25
+        elif len(num) == 3:
+            min_conf = 0.20
         else:  # 4 dígitos
-            min_conf = 0.20  # 4 dígitos mais fáceis de validar
+            min_conf = 0.15  # 4 dígitos - muito permissivo
         
-        # Se detectado múltiplas vezes, aceita menor confiança
+        # Se detectado múltiplas vezes, aceita ainda menor
         if len(group) >= 2:
-            min_conf -= 0.10
+            min_conf = max(0.10, min_conf - 0.10)  # Mínimo 10%
         
         if best["confidence"] >= min_conf:
             final_results.append(best)
