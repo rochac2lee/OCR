@@ -83,17 +83,23 @@ def predict():
     try:
         results = extract_jersey_numbers(img)
         
-        # Formatar resposta: apenas array com accuracy e number
+        # Formatar resposta: remover bbox, renomear confidence para accuracy em %
         formatted_results = [
             {
+                "number": r["number"],
                 "accuracy": round(r["confidence"] * 100),
-                "number": r["number"]
             }
             for r in results
         ]
         
-        # Retorna apenas o array
-        return jsonify(formatted_results)
+        processing_time = round((time.time() - start_time) * 1000, 2)  # ms
+        
+        return jsonify({
+            "success": True,
+            "results": formatted_results,
+            "count": len(formatted_results),
+            "processing_time_ms": processing_time
+        })
         
     except Exception as e:
         return jsonify({
