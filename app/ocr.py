@@ -158,21 +158,18 @@ def enhance_image_for_digits(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     upscaled_15 = cv2.resize(enhanced1, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
     upscaled_20 = cv2.resize(enhanced1, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     
-    # Retorna variantes TESTADAS
+    # 4 variantes otimizadas (balanço velocidade/precisão)
     variants = [
-        # 1. Original (sempre funciona)
+        # 1. Original (baseline)
         {"img": image_bgr, "sx": 1.0, "sy": 1.0},
         
         # 2. CLAHE + Denoise + Sharpen (melhor para contraste)
         {"img": enhanced1, "sx": 1.0, "sy": 1.0},
         
-        # 3. Morphological enhancement (bom para bordas)
-        {"img": enhanced2_bgr, "sx": 1.0, "sy": 1.0},
-        
-        # 4. Upscale 1.5x (números pequenos)
+        # 3. Upscale 1.5x (números pequenos)
         {"img": upscaled_15, "sx": 1.5, "sy": 1.5},
         
-        # 5. Upscale 2.0x (números muito pequenos/foscos)
+        # 4. Upscale 2.0x (números muito pequenos/foscos)
         {"img": upscaled_20, "sx": 2.0, "sy": 2.0},
     ]
     
