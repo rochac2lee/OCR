@@ -3,7 +3,6 @@
 from flask import Flask, request, jsonify
 import numpy as np
 import cv2
-import time
 from .ocr import extract_jersey_numbers
 
 app = Flask(__name__)
