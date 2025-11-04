@@ -1,7 +1,5 @@
-"""
-API Flask para extração de números de camisas de atletas.
-Otimizado para máxima velocidade em CPU usando PaddleOCR.
-"""
+# API Flask pra detectar números de camisa
+# usa PaddleOCR pq roda rápido em CPU
 from flask import Flask, request, jsonify
 import numpy as np
 import cv2
@@ -12,7 +10,7 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
 def health_check():
-    """Health check endpoint."""
+    # só pra ver se tá rodando
     return jsonify({
         "status": "ok",
         "message": "API de detecção de números de camisas ativa",
@@ -21,21 +19,10 @@ def health_check():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    """
-    Endpoint principal para detecção de números em camisas de atletas.
+    # recebe imagem e retorna os números detectados
+    # envia POST com form-data: image=arquivo.jpg
     
-    Expects:
-        - Multipart form-data com campo 'image'
-        - Formatos suportados: JPEG, PNG, WEBP
-        
-    Returns:
-        JSON com lista de números detectados e suas precisões (0-100%)
-        
-    Example:
-        curl -X POST -F "image=@camisa.jpg" http://localhost:8000/predict
-    """
-    
-    # Validação de entrada
+    # valida se mandou a imagem
     if "image" not in request.files:
         return jsonify({
             "error": "Campo 'image' é obrigatório",
@@ -49,7 +36,7 @@ def predict():
             "detail": "O campo 'image' está vazio"
         }), 400
 
-    # Validar formato de imagem por extensão (mimetype pode estar vazio)
+    # checa se é jpg/png/webp (mimetype nem sempre vem)
     allowed_extensions = ('.jpg', '.jpeg', '.png', '.webp')
     filename_lower = file.filename.lower()
     
@@ -60,7 +47,7 @@ def predict():
             "filename": file.filename
         }), 400
 
-    # Processar imagem
+    # decodifica a imagem
     try:
         data = file.read()
         npimg = np.frombuffer(data, np.uint8)
@@ -78,11 +65,11 @@ def predict():
             "detail": str(e)
         }), 500
 
-    # Extrair números
+    # roda o OCR
     try:
         results = extract_jersey_numbers(img)
         
-        # Formatar resposta: remover bbox, renomear confidence para accuracy em %
+        # formata a resposta com accuracy em porcentagem
         formatted_results = [
             {
                 "number": r["number"],
@@ -105,7 +92,6 @@ def predict():
 
 @app.errorhandler(413)
 def request_entity_too_large(error):
-    """Handle payload too large errors."""
     return jsonify({
         "error": "Arquivo muito grande",
         "detail": "O tamanho máximo permitido é 16MB"
@@ -113,7 +99,6 @@ def request_entity_too_large(error):
 
 @app.errorhandler(500)
 def internal_server_error(error):
-    """Handle internal server errors."""
     return jsonify({
         "error": "Erro interno do servidor",
         "detail": "Ocorreu um erro inesperado"
