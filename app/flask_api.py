@@ -7,15 +7,6 @@ from .ocr import extract_jersey_numbers
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def health_check():
-    # só pra ver se tá rodando
-    return jsonify({
-        "status": "ok",
-        "message": "API de detecção de números de camisas ativa",
-        "version": "1.0.0"
-    })
-
 @app.route("/predict", methods=["POST"])
 def predict():
     # recebe imagem e retorna os números detectados
