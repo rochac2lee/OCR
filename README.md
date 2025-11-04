@@ -8,6 +8,10 @@ O sistema aplica várias técnicas de pré-processamento na imagem (CLAHE, opera
 
 Otimizado para rodar em CPU - os testes mostraram que usar 1 thread é mais rápido que multithreading nesse caso.
 
+## Resultados
+![ezgif-2c753fd31b4a01](https://github.com/user-attachments/assets/f5c6698b-29e4-4de2-9e46-50ce68ebd96d)
+
+
 ## Rodando com Docker
 
 ```bash
