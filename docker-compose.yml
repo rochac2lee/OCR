@@ -1,9 +1,9 @@
 services:
-  api:
+  jersey_number_ocr:
     build: 
       context: .
       dockerfile: Dockerfile
-    container_name: ocr_api_fast
+    container_name: jersey_number_ocr
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -12,18 +12,13 @@ services:
       - FLASK_ENV=development
       - FLASK_RUN_HOST=0.0.0.0
       - FLASK_RUN_PORT=8000
-      # Otimizações CPU - 1 thread é mais rápido para inferência
       - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=1
       - OPENBLAS_NUM_THREADS=1
     command: ["flask", "run", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
-      # Hot reload - apenas código da aplicação
       - "./app:/app/app"
-      # Logs persistentes
       - "./logs:/app/logs"
-    mem_limit: 2g
-    memswap_limit: 4g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s
